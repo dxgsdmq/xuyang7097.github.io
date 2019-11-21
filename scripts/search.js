@@ -1,1 +1,104 @@
-!function(a){var e={};function i(t){if(e[t])return e[t].exports;var n=e[t]={i:t,l:!1,exports:{}};return a[t].call(n.exports,n,n.exports,i),n.l=!0,n.exports}i.m=a,i.c=e,i.d=function(a,e,t){i.o(a,e)||Object.defineProperty(a,e,{configurable:!1,enumerable:!0,get:t})},i.n=function(a){var e=a&&a.__esModule?function(){return a.default}:function(){return a};return i.d(e,"a",e),e},i.o=function(a,e){return Object.prototype.hasOwnProperty.call(a,e)},i.p="",i(i.s=20)}({20:function(a,e){$(document).ready(function(){var a=algolia;if(a.applicationID&&a.apiKey&&a.indexName){var e=instantsearch({appId:a.applicationID,apiKey:a.apiKey,indexName:a.indexName,searchFunction:function(a){$("#algolia-search-input").find("input").val()&&a.search()}});[instantsearch.widgets.searchBox({container:"#algolia-search-input",placeholder:a.labels.input_placeholder}),instantsearch.widgets.hits({container:"#algolia-hits",hitsPerPage:a.hits.per_page||10,templates:{item:function(a){return'<a href="'+(a.permalink?a.permalink:siteMeta.root+a.path)+'" class="algolia-hit-item-link">'+a._highlightResult.title.value+"</a>"},empty:function(e){return'<div id="algolia-hits-empty">'+a.labels.hits_empty.replace(/\$\{query}/,e.query)+"</div>"}},cssClasses:{item:"algolia-hit-item"}}),instantsearch.widgets.stats({container:"#algolia-stats",templates:{body:function(e){return a.labels.hits_stats.replace(/\$\{hits}/,e.nbHits).replace(/\$\{time}/,e.processingTimeMS)+'<span class="algolia-powered">  <img src="'+siteMeta.root+'assets/algolia_logo.svg" alt="Algolia" /></span><hr />'}}}),instantsearch.widgets.pagination({container:"#algolia-pagination",scrollTo:!1,showFirstLast:!1,labels:{first:'<i class="fa fa-angle-double-left"></i>',last:'<i class="fa fa-angle-double-right"></i>',previous:'<i class="fa fa-angle-left"></i>',next:'<i class="fa fa-angle-right"></i>'},cssClasses:{root:"pagination",item:"pagination-item",link:"page-number",active:"current",disabled:"disabled-item"}})].forEach(e.addWidget,e),e.start(),$(".popup-trigger").on("click",function(a){a.stopPropagation(),$("body").append('<div class="search-popup-overlay algolia-pop-overlay"></div>').css("overflow","hidden"),$(".popup").toggle(),$("#algolia-search-input").find("input").focus()}),$(".popup-btn-close").click(function(){$(".popup").hide(),$(".algolia-pop-overlay").remove(),$("body").css("overflow","")})}else window.console.error("Algolia Settings are invalid.")})}});
+/**
+ * 站内搜索
+ */
+define(['jquery', 'util'], function($, util) {
+  'use strict'
+
+  var SEARCH_KEY = 'SEARCH'
+  var SEARCH_EXPIRE = 30 * 24 * 60 * 60 * 1000 // 默认过期时间30天
+  var resultBoxDom = $('#result-box')
+  var resultConutBoxDom = $('#result-count')
+  var _img_temp = `<div class="left" style="background-image: url('{IMG}')"></div>`
+  var _temp = `<li>
+                <a href="{PERMALINK}" target="_blank">
+                  {IMG_TEMP}
+                  <div class="right">
+                    <div class="title">{TITLE}</div>
+                    <div class="time">{TIME}</div>
+                    <div class="intro">{INTRO}</div>
+                  </div>
+                </a>
+              </li>`
+
+  function getStatic() {
+    return util.STORAGE.getInstance().get(SEARCH_KEY)
+  }
+
+  function setStatic(value) {
+    return util.STORAGE.getInstance().set(SEARCH_KEY, value, SEARCH_EXPIRE)
+  }
+
+  function getSeatchData() {
+    let content = getStatic()
+    if (!content) {
+      return fetch('/content.json', { method: 'GET' })
+        .then(resp => resp.json())
+        .then(json => {
+          json && setStatic(json)
+          return json
+        })
+        .catch(error => console.log('fetch failed', error))
+    } else {
+      return Promise.resolve(content)
+    }
+  }
+
+  /**
+   * 匹配
+   */
+  function matcher(post, key) {
+    // 关键字 => 正则，空格隔开的看作多个关键字
+    // a b c => /a|b|c/gmi
+    // g 全局匹配，m 多行匹配，i 不区分大小写
+    var regExp = new RegExp(key.replace(/[ ]/g, '|'), 'gmi')
+
+    // 匹配优先级：title > tags > text
+    return (
+      regExp.test(post.title) ||
+      post.tags.some(function(tag) {
+        return regExp.test(tag.name)
+      }) ||
+      regExp.test(post.text)
+    )
+  }
+
+  function inputSearch(key) {
+    if (key) {
+      // 尝试获取数据
+      getSeatchData().then(data => {
+        let posts = data.posts
+
+        if (posts.length) {
+          let result
+          result = posts.filter(post => matcher(post, key))
+          resultConutBoxDom.html(result.length)
+
+          if (result.length) {
+            let _li = ''
+            for (let i = 0; i < result.length; i++) {
+              let _img = ''
+              if (result[i].photos.length > 0) {
+                _img = _img_temp.replace('{IMG}', result[i].photos[0])
+              }
+
+              _li += _temp
+                .replace('{PERMALINK}', result[i].permalink)
+                .replace('{TITLE}', result[i].title)
+                .replace('{IMG_TEMP}', _img)
+                .replace('{TIME}', result[i].date)
+                .replace('{INTRO}', result[i].text.substring(0, 100) + '...')
+            }
+            resultBoxDom.html(_li)
+          } else {
+            resultBoxDom.html(`<li><a href="#">无结果</a></li>`)
+          }
+        }
+      })
+    } else {
+      resultBoxDom.html('')
+      resultConutBoxDom.html(0)
+    }
+  }
+
+  $(document).on('input', '.input-wrap > input', util.debounce(inputSearch, 300))
+})
